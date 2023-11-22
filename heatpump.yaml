@@ -1,0 +1,275 @@
+esphome:
+  name: "heatpump"
+  platform: ESP8266
+  board: nodemcuv2
+  on_boot:
+    then:
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "YOURKEYHERE"
+
+ota:
+  password: "YOURPASSHERE"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Heatpump Fallback Hotspot"
+    password: "YOURPASSHERE"
+
+captive_portal:
+
+dallas:
+  - pin: D1
+    update_interval: 2s
+
+i2c:
+  scan: True
+
+sensor:
+  - platform: dallas
+    id: cold
+    address: 0xaa0306979462f828
+    name: "Cold HVAC Temp out"
+  - platform: dallas
+    id: coldin
+    address: 0x7a031497944f2428
+    name: "Cold HVAC Temp in"
+  - platform: dallas
+    id: hot
+    address: 0xda03019794413928
+    name: "Hot HVAC Temp out"
+  - platform: dallas
+    id: hotin
+    address: 0x9e031497940df928
+    name: "Hot HVAC Temp in"
+  - platform: dallas
+    id: motortemp
+    address: 0x0e031097945b6728
+    name: "Compressor Temperature"
+  - platform: dallas
+    id: tanktemp
+    address: 0x12031497944b7728
+    name: "Storage tank Temp"
+  - platform: pulse_counter
+    id: flowhot
+    pin: D2
+    name: "HVAC Hot Water flow"
+    update_interval: 2s
+    filters:
+    - lambda: return (x / 27.0) * 60.0;
+    unit_of_measurement: "L/hr"  
+  - platform: pulse_counter
+    id: flowcold
+    pin: D3
+    name: "HVAC Cold Water flow"
+    update_interval: 2s
+    filters:
+    - lambda: return (x / 27.0) * 60.0;
+    unit_of_measurement: "L/hr"  
+text_sensor:
+  - platform: template
+    name: "Function"
+    id: function 
+  - platform: template
+    name: "Power output"
+    id: powerout
+  - platform: template
+    name: "System Status"
+    id: system_status
+
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          static uint32_t compressor_on_time = 0;
+
+          bool sensors_ok = true;
+
+          float deltaTempHot = id(hot).state - id(hotin).state;
+          float deltaTempCold = id(cold).state - id(coldin).state;
+
+          // Check if any temperature sensor reports NaN (not-a-number) value
+          if (std::isnan(deltaTempHot) || std::isnan(deltaTempCold)) {
+              sensors_ok = false;
+          }
+
+          float flowRateHot = id(flowhot).state;
+          float flowRateCold = id(flowcold).state;
+
+          // Check if water flow rates are below 5 liters/minute
+          if (flowRateHot < 5.0 || flowRateCold < 5.0) {
+              sensors_ok = false;
+          }
+
+          // Check compressor temperature
+          float compressorTemp = id(motortemp).state;
+          if (compressorTemp > 95.0) {
+              // Activate cooling fan
+              id(compressorcool).turn_on();
+          } else {
+              id(compressorcool).turn_off();
+          }
+
+          if (id(compressor).state) {
+              if (compressor_on_time == 0) {
+                  compressor_on_time = millis(); // Start tracking time when compressor turns on
+              }
+
+              // Check if 10 seconds have elapsed since the compressor turned on
+              if (millis() - compressor_on_time < 10000) {
+                  // Wait for 10 seconds before activating failsafe
+                  id(system_status).publish_state("OK");
+                  return;
+              }
+          } else {
+              compressor_on_time = 0; // Reset timer if compressor is off
+          }
+
+          if (sensors_ok) {
+              // Convert flow rates to liters/minute
+              flowRateHot = flowRateHot / 60.0;
+              flowRateCold = flowRateCold / 60.0;
+
+              float heatTransferHot = (deltaTempHot * flowRateHot * 4.18);
+              char buffer[30]; // Adjust buffer size for additional text
+              snprintf(buffer, sizeof(buffer), "%.2f W/hour", heatTransferHot);
+              id(powerout).publish_state(std::string(buffer));
+              id(system_status).publish_state("OK");
+          } else {
+              id(system_status).publish_state("Fault: Sensor or Flow issue");
+
+              // Turn off components on error
+              id(compressor).turn_off();
+              id(pumphot).turn_off();
+              id(pumpcold).turn_off();
+          }
+
+          static bool error_flag = false;
+
+
+
+switch:
+  - platform: gpio
+    pin: D4
+    inverted: True
+    id: compressor
+    name: "HVAC Compressor"
+    icon: "mdi:restart"
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - logger.log: "Compressor turned on"
+      - switch.turn_on: pumpcold
+      - switch.turn_on: pumphot
+    on_turn_off:
+      - logger.log: "Compressor just turned off"
+
+  - platform: gpio
+    pin: D5
+    inverted: True
+    id: pumphot
+    name: "Pump Hot side"
+    icon: mdi:fire
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - logger.log: "Water Pump hot side just turned on"
+    on_turn_off:
+      - logger.log: "Water Pump hot side just turned off"
+
+  - platform: gpio
+    pin: D6
+    inverted: True
+    id: pumpcold
+    name: "Pump Cold side"
+    icon: mdi:snowflake
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - logger.log: "Water Pump cold side just turned on"
+    on_turn_off:
+      - logger.log: "Water Pump cold side just turned off"
+
+  - platform: gpio
+    pin: D7
+    inverted: True
+    id: compressorcool
+    name: "Compressor cooling"
+    icon: mdi:Valve
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - logger.log: "Compressor too hot"
+    on_turn_off:
+      - logger.log: "Compressor normal"
+
+  - platform: template
+    name: "Vent System HA"
+    id: vent_system_ha
+    icon: "mdi:fan"
+    turn_on_action:
+      - switch.turn_on: pumphot
+      - switch.turn_on: pumpcold
+      - logger.log: "Vent system activated (HA)"
+      - switch.turn_off: compressor_safety  # Ensure safety is off when starting the system
+    turn_off_action:
+      - switch.turn_off: pumphot
+      - switch.turn_off: pumpcold
+      - switch.turn_off: compressor
+      - logger.log: "Vent system deactivated (HA)"
+
+  - platform: template
+    name: "Compressor Safety"
+    id: compressor_safety
+    turn_on_action:
+      - switch.turn_on: compressor
+      - logger.log: "Compressor safety activated"
+    turn_off_action:
+      - switch.turn_off: compressor
+      - switch.turn_off: pumphot
+      - switch.turn_off: pumpcold
+      - logger.log: "Compressor safety deactivated"
+
+climate:
+
+  - platform: thermostat
+    id: climatehot
+    name: "Heater Thermostat"
+    sensor: hot
+    icon: mdi:thermostat
+    min_heating_off_time: 60s
+    min_heating_run_time: 0s
+    min_idle_time: 60s
+    heat_action:
+      - switch.turn_on: compressor
+      - switch.turn_on: pumpcold
+      - switch.turn_on: pumphot
+      - logger.log: "Heating"
+      - text_sensor.template.publish:
+          id: function
+          state: "Heating"
+    idle_action:
+      - switch.turn_off: compressor
+      - delay: 20s
+      - switch.turn_off: pumpcold
+      - delay: 6s
+      - delay: 100s
+      - text_sensor.template.publish:
+          id: function
+          state: "Idle"
+    default_preset: Summer
+    preset:
+      - name: Summer
+        default_target_temperature_low: 50 °C
+      - name: Winter
+        default_target_temperature_low: 60 °C
+    visual:
+      min_temperature: 50
+      max_temperature: 70
+      temperature_step: 1
+
+ 
