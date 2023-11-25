@@ -10,10 +10,10 @@ logger:
 # Enable Home Assistant API
 api:
   encryption:
-    key: "YOURKEYHERE"
+    key: "..."
 
 ota:
-  password: "YOURPASSHERE"
+  password: "..."
 
 wifi:
   ssid: !secret wifi_ssid
@@ -22,16 +22,16 @@ wifi:
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
     ssid: "Heatpump Fallback Hotspot"
-    password: "YOURPASSHERE"
+    password: "7o0Ri5oA5XnQ"
 
 captive_portal:
 
 dallas:
   - pin: D1
-    update_interval: 2s
+    update_interval: 3s
 
 i2c:
-  scan: True
+  scan: False
 
 sensor:
   - platform: dallas
@@ -62,18 +62,18 @@ sensor:
     id: flowhot
     pin: D2
     name: "HVAC Hot Water flow"
-    update_interval: 2s
+    update_interval: 3s
     filters:
-    - lambda: return (x / 27.0) * 60.0;
-    unit_of_measurement: "L/hr"  
+    - lambda: return (x / 20) * 60.0;
+    unit_of_measurement: "L/min"  
   - platform: pulse_counter
     id: flowcold
     pin: D3
     name: "HVAC Cold Water flow"
-    update_interval: 2s
+    update_interval: 3s
     filters:
-    - lambda: return (x / 27.0) * 60.0;
-    unit_of_measurement: "L/hr"  
+    - lambda: return (x / 20) * 60.0;
+    unit_of_measurement: "L/min"  
 text_sensor:
   - platform: template
     name: "Function"
@@ -116,6 +116,9 @@ interval:
               id(compressorcool).turn_on();
           } else {
               id(compressorcool).turn_off();
+          }
+          if (compressorTemp >= 97.0) {
+              id(compressor).turn_off();
           }
 
           if (id(compressor).state) {
@@ -207,33 +210,6 @@ switch:
     on_turn_off:
       - logger.log: "Compressor normal"
 
-  - platform: template
-    name: "Vent System HA"
-    id: vent_system_ha
-    icon: "mdi:fan"
-    turn_on_action:
-      - switch.turn_on: pumphot
-      - switch.turn_on: pumpcold
-      - logger.log: "Vent system activated (HA)"
-      - switch.turn_off: compressor_safety  # Ensure safety is off when starting the system
-    turn_off_action:
-      - switch.turn_off: pumphot
-      - switch.turn_off: pumpcold
-      - switch.turn_off: compressor
-      - logger.log: "Vent system deactivated (HA)"
-
-  - platform: template
-    name: "Compressor Safety"
-    id: compressor_safety
-    turn_on_action:
-      - switch.turn_on: compressor
-      - logger.log: "Compressor safety activated"
-    turn_off_action:
-      - switch.turn_off: compressor
-      - switch.turn_off: pumphot
-      - switch.turn_off: pumpcold
-      - logger.log: "Compressor safety deactivated"
-
 climate:
 
   - platform: thermostat
@@ -268,7 +244,7 @@ climate:
       - name: Winter
         default_target_temperature_low: 60 °C
     visual:
-      min_temperature: 50
+      min_temperature: 30
       max_temperature: 70
       temperature_step: 1
 
