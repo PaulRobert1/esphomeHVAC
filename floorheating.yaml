@@ -1,0 +1,234 @@
+esphome:
+  name: "floorheating"
+  friendly_name: "floorheating"
+
+  on_shutdown:
+    then:
+
+esp32:
+  board: nodemcu-32s
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "..."
+
+ota:
+  password: "..."
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  
+sensor:
+  - platform: homeassistant
+    entity_id: YOUR.temp_sensor_HERE
+    id: bathroom_temperature
+    name: "Bathroom Temperature"
+    accuracy_decimals: 1
+    filters:
+      - lambda: return x * 1.0;
+  - platform: homeassistant
+    entity_id: YOUR.temp_sensor_HERE
+    id: kitchen_temperature
+    name: "Kitchen Temperature"
+    accuracy_decimals: 1
+    filters:
+      - lambda: return x * 1.0;
+  - platform: homeassistant
+    entity_id: YOUR.temp_sensor_HERE
+    id: livingroom_temperature
+    name: "Livingroom Temperature"
+    accuracy_decimals: 1
+    filters:
+      - lambda: return x * 1.0;
+  - platform: homeassistant
+    entity_id: YOUR.temp_sensor_HERE
+    id: bedroom_temperature
+    name: "Bedroom Temperature"
+    accuracy_decimals: 1
+    filters:
+      - lambda: return x * 1.0;
+  - platform: homeassistant
+    entity_id: YOUR.temp_sensor_HERE
+    id: corridor_temperature
+    name: "Corridor Temperature"
+    accuracy_decimals: 1
+    filters:
+      - lambda: return x * 1.0;
+  - platform: homeassistant
+    entity_id: YOUR.temp_sensor_HERE
+    id: hvac_temperature
+    name: "Storage Tank Temperature"
+    accuracy_decimals: 1
+    filters:
+      - lambda: return x * 1.0;
+    
+switch:
+  - platform: gpio
+    pin: GPIO32
+    inverted: True
+    id: bathroom
+    name: "Bathroom valve"
+    icon: "mdi:restart"
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+    - logger.log: "Bathroom heating turned on"    
+
+  - platform: gpio
+    pin: GPIO33
+    inverted: True
+    id: kitchen
+    name: "Kitchen valve"
+    icon: "mdi:restart"
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+    - logger.log: "Kitchen heating turned on"    
+
+  - platform: gpio
+    pin: GPIO14
+    inverted: True
+    id: livingroom
+    name: "Livingroom valve"
+    icon: "mdi:restart"
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+    - logger.log: "Livingroom heating turned on"
+
+  - platform: gpio
+    pin: GPIO27
+    inverted: True
+    id: bedroom
+    name: "Bedroom valve"
+    icon: "mdi:restart"
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+    - logger.log: "Bedroom heating turned on"
+
+  - platform: gpio
+    pin: GPIO26
+    inverted: True
+    id: corridor
+    name: "Corridor valve"
+    icon: "mdi:restart"
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+    - logger.log: "Corridor heating turned on"
+
+  - platform: gpio
+    pin: GPIO25
+    inverted: True
+    id: bypass
+    name: "Bypass valve"
+    icon: "mdi:restart"
+    restore_mode: RESTORE_DEFAULT_OFF
+
+climate:
+  - platform: thermostat
+    name: "Bathroom Climate"
+    sensor: bathroom_temperature
+    min_heating_off_time: 0s
+    min_heating_run_time: 0s
+    min_idle_time: 0s 
+    heat_action:
+      - switch.turn_on: bathroom
+      - logger.log: "Heating Bathroom"
+    idle_action:
+      - switch.turn_off: bathroom
+      - logger.log: "Bathroom heating Idle"
+    visual:
+      min_temperature: 5
+      max_temperature: 33
+      temperature_step: 0.5
+
+  - platform: thermostat
+    name: "Kitchen Climate"
+    sensor: kitchen_temperature
+    min_heating_off_time: 0s
+    min_heating_run_time: 0s
+    min_idle_time: 0s 
+    heat_action:
+      - switch.turn_on: kitchen
+      - logger.log: "Heating Kitchen"
+    idle_action:
+      - switch.turn_off: kitchen
+      - logger.log: "Kitchen heating Idle"
+    visual:
+      min_temperature: 5
+      max_temperature: 33
+      temperature_step: 0.5
+
+  - platform: thermostat
+    name: "Livingroom Climate"
+    sensor: livingroom_temperature
+    min_heating_off_time: 0s
+    min_heating_run_time: 0s
+    min_idle_time: 0s 
+    heat_action:
+      - switch.turn_on: livingroom
+      - logger.log: "Heating Livingroom"
+    idle_action:
+      - switch.turn_off: livingroom
+      - logger.log: "Livingroom heating Idle"
+    visual:
+      min_temperature: 5
+      max_temperature: 33
+      temperature_step: 0.5
+
+  - platform: thermostat
+    name: "Bedroom Climate"
+    sensor: bedroom_temperature
+    min_heating_off_time: 0s
+    min_heating_run_time: 0s
+    min_idle_time: 0s 
+    heat_action:
+      - switch.turn_on: bedroom
+      - logger.log: "Heating Bedroom"
+    idle_action:
+      - switch.turn_off: bedroom
+      - logger.log: "Bedroom heating Idle"
+    visual:
+      min_temperature: 5
+      max_temperature: 33
+      temperature_step: 0.5
+
+  - platform: thermostat
+    name: "Corridor Climate"
+    sensor: corridor_temperature
+    min_heating_off_time: 0s
+    min_heating_run_time: 0s
+    min_idle_time: 0s 
+    heat_action:
+      - switch.turn_on: corridor
+      - logger.log: "Heating Corridor"
+    idle_action:
+      - switch.turn_off: bedroom
+      - logger.log: "Corridor heating Idle"
+    visual:
+      min_temperature: 5
+      max_temperature: 33
+      temperature_step: 0.5
+
+  - platform: thermostat
+    name: "Bypass Valve"
+    sensor: hvac_temperature
+    min_heating_off_time: 0s
+    min_heating_run_time: 0s
+    min_idle_time: 0s 
+    heat_action:
+      - switch.turn_off: bypass
+      - logger.log: "Heating Bypass Disabled"
+    idle_action:
+      - switch.turn_on: bypass
+      - logger.log: "Heating bypass Enabled"
+    visual:
+      min_temperature: 5
+      max_temperature: 60
+      temperature_step: 0.5
+
+
