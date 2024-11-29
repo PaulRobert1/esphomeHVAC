@@ -15,7 +15,8 @@ and not one, but TWO generic water flow sensors (they're like the quirky sidekic
 
 Sharing the code, maybe it will help others achieve a more efficient cost effective heating solution
 
-
+************************************************************
+Meanwhile esp8266 did not live up to the task so I switched to a esp32 and updated the code, also added a 2in1 controller for both solar and heat pump controls.
 
 
 
