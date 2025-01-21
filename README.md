@@ -17,6 +17,8 @@ Sharing the code, maybe it will help others achieve a more efficient cost effect
 
 ************************************************************
 Meanwhile esp8266 did not live up to the task so I switched to a esp32 and updated the code, also added a 2in1 controller for both solar and heat pump controls.
-
+****************************
+UPDATE:
+HVACSolarHeater is a 2 in 1 config, controls solar pump with pwm and controls HVAC.
 
 
