@@ -26,8 +26,49 @@ If one of the following is abnormal the system will halt and the device in HA wi
 Hot and Cold flow, compressor too hot, hot and cold abnormal temperature when operating.
 
 In the near future I also want to add a hal sensor to the compressor to detect if it is stuck or not starting up and some sort of pressure sensors for the HVAC refrigerant, was thinking about automotive AC sensors.
-
 Solar heater sensor and tank backup sensors I used bi-metal temp sensors due to their high temperature resistance. (In summer solar panels when not operating heat upto 200 celsius)
- 
+1) Parts you need
+Core
 
+ESP32 DevKit (ESP32-WROOM style)
+
+2× MAX6675 modules + 2× K-type thermocouples
+5× DS18B20 (Dallas 1-Wire) temperature sensors (you have 5 addresses)
+2× water flow sensors (pulse output)
+Power / wiring essentials
+Stable 5V supply for ESP32 (USB or buck converter)
+3.3V reference available (ESP32 3V3 pin)
+4.7k resistor for DS18B20 data pull-up (mandatory)
+Pull-up resistors for flow sensors if they are open-collector (often 4.7k–10k to 3.3V)
+Switching / driving loads
+Relays / SSR / MOSFET drivers for:
+Compressor
+Hot pump
+Cold pump
+“compressorcool” valve/relay
+Optional DS18B20 power switching (GPIO17)
+A proper MOSFET driver stage for the PWM solar pump if it’s a DC pump (don’t drive a pump directly from ESP32 pin)
+
+pin layout configured at the time
+
+Inputs (sensors)
+
+GPIO2: 1-Wire bus for DS18B20 sensors
+GPIO36: Hot flow pulse input (flowhot)
+GPIO39: Cold flow pulse input (flowcold)
+MAX6675 #1 CS: GPIO18 (tank_temp2)
+MAX6675 #2 CS: GPIO22 (collector_temp)
+SPI bus:
+CLK: GPIO1
+MISO: GPIO3
+
+Outputs (actuators)
+
+GPIO0: PWM solar pump (LEDC output, pwm_pump)
+GPIO25: Compressor relay (compressor)
+GPIO14: Hot pump relay (pumphot)
+GPIO27: Cold pump relay (pumpcold)
+GPIO4: Compressorcool relay/valve (inverted: active LOW)
+GPIO23: Alarm LED output
+GPIO17: Dallas temp “power” switch output (dallas_temppower)
 
