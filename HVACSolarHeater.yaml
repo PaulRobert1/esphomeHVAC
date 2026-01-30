@@ -1,3 +1,6 @@
+############################################
+# CORE DEVICE CONFIGURATION
+############################################
 esphome:
   name: hvac-solarheater
   friendly_name: HVAC-SolarHeater
@@ -7,22 +10,30 @@ esp32:
   framework:
     type: arduino
 
-# Enable logging
+# Enable serial logging
 logger:
 
-# Enable Home Assistant API
+# Enable Home Assistant native API (with encryption)
 api:
   encryption:
-    key: "PASS"
+    key: "KEY"
 
+# OTA updates via ESPHome Dashboard
 ota:
   - platform: esphome
     password: "PASS"
 
+############################################
+# NETWORKING
+############################################
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
+  manual_ip:
+    gateway: 192.168.100.1
+    subnet: 255.255.255.0
+    static_ip: 192.168.100.125
 
   ap:
     ssid: "Hvac-Solarheater"
@@ -30,34 +41,12 @@ wifi:
 
 web_server:
   port: 80
-      
-spi:
-  clk_pin: GPIO1
-  miso_pin: GPIO3
-
-globals:
-  - id: daily_energy_wh
-    type: float
-    restore_value: no
-    initial_value: '0'
-  - id: display_mode
-    type: int
-    restore_value: no
-    initial_value: '0'
-  - id: page_number
-    type: int
-    restore_value: no
-    initial_value: '0'
-  - id: compressor_runtime
-    type: int
-    restore_value: no
-    initial_value: "0"
-  - id: pwm_level
-    type: float
-    initial_value: '0.0'
 
 captive_portal:
 
+############################################
+# TIME
+############################################
 time:
   - platform: homeassistant
     id: esptime
@@ -68,14 +57,78 @@ time:
         days_of_week: MON-SUN
         then:
           - lambda: |-
-              id(daily_energy_wh) = 0;
+              // Optional: Reset a daily counter here if needed
+              // id(daily_energy_sensor).reset();
+
+############################################
+# BUS CONFIGURATION
+############################################
+spi:
+  clk_pin: GPIO1
+  miso_pin: GPIO3
+
 one_wire:
   - platform: gpio
     pin: GPIO2
 
+############################################
+# GLOBAL VARIABLES
+############################################
+globals:
+  - id: display_mode
+    type: int
+    restore_value: no
+    initial_value: '0'
 
+  - id: page_number
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: compressor_runtime
+    type: int
+    restore_value: no
+    initial_value: "0"
+
+  - id: pwm_level
+    type: float
+    initial_value: '0.0'
+
+  # Error state: 0 = OK, 1 = Flow Low, 2 = Flow High (warn), 3 = Overheat, 4 = Sensor/Flow fault
+  - id: error_state
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  # Used for auto-recovery after stable operation
+  - id: error_clear_timer
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  # Smoothed flow values
+  - id: avg_flow_hot
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+
+  - id: avg_flow_cold
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+
+  # Compressor on-time (millis at last start)
+  - id: compressor_on_time
+    type: int
+    restore_value: no
+    initial_value: "0"
+
+############################################
+# SENSORS
+############################################
 sensor:
 
+  # MAX6675 thermocouples
   - platform: max6675
     name: "Tank Temperature Backup"
     id: tank_temp2
@@ -83,19 +136,23 @@ sensor:
     update_interval: 30s
     filters:
       - offset: 2
+
   - platform: max6675
     name: "Solar Collector Temperature"
     id: collector_temp
     cs_pin: GPIO22
-    update_interval: 5s
+    update_interval: 10s
     filters:
       - offset: -10
+
+  # Dallas one-wire sensors
   - platform: dallas_temp
     id: cold
     address: 0xaa0306979462f828
     update_interval: 10s
     name: "Cold HVAC Out"
     icon: mdi:snowflake-thermometer
+
   - platform: dallas_temp
     id: coldin
     address: 0x7a031497944f2428
@@ -104,47 +161,95 @@ sensor:
     icon: mdi:snowflake-melt
     filters:
       - offset: -0.2
+
   - platform: dallas_temp
     id: hot
     address: 0xda03019794413928
-    update_interval: 6s
+    update_interval: 10s
     name: "Hot HVAC Out"
+
   - platform: dallas_temp
     id: hotin
     address: 0x9e031497940df928
-    update_interval: 6s
+    update_interval: 10s
     name: "Hot HVAC In"
     filters:
       - offset: 2.7
+
   - platform: dallas_temp
     id: motortemp
     address: 0x0e031097945b6728
-    update_interval: 6s
+    update_interval: 10s
     name: "Compressor Temperature"
+
   - platform: dallas_temp
     id: tanktemp
     address: 0x12031497944b7728
-    update_interval: 6s
+    update_interval: 30s
     name: "Storage Tank Temperature"
+
+# Flow sensors
   - platform: pulse_counter
     id: flowhot
     pin: GPIO36
     name: "HVAC Hot Water flow"
-    update_interval: 6s
+    update_interval: 10s
     filters:
+      - debounce: 0.1s
       - round: 1
-      - lambda: return (x / 20) * 60.0;
+      # PREVIOUS: return ((x / 20.0) * 60.0) * 0.58;
+      # NEW: Divide by 1000 to convert mL to Liters
+      - lambda: return (((x / 20.0) * 60.0) * 0.58) / 1000.0; 
     unit_of_measurement: "L/min"
+    accuracy_decimals: 2  # Added to see decimals like 8.55
+
   - platform: pulse_counter
     id: flowcold
     pin: GPIO39
     name: "HVAC Cold Water flow"
     update_interval: 5s
     filters:
+      - debounce: 0.1s
       - round: 1
-      - lambda: return (x / 20) * 60.0;
+      # PREVIOUS: return (x / 20.0) * 60.0;
+      # NEW: Divide by 1000 to convert mL to Liters
+      - lambda: return ((x / 20.0) * 60.0) / 1000.0;
     unit_of_measurement: "L/min"
-    
+    accuracy_decimals: 2
+
+  # ----------------------------------------
+  # POWER & ENERGY CALCULATIONS
+  # ----------------------------------------
+  
+  # 1. Instantaneous Thermal Power (Watts)
+  - platform: template
+    name: "HVAC Thermal Power Output"
+    id: thermal_power_watts
+    unit_of_measurement: "W"
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: |-
+      if (!id(compressor).state) return 0.0;
+      
+      float flow = id(flowhot).state;
+      float dt = id(hot).state - id(hotin).state;
+      
+      if (isnan(flow) || isnan(dt) || flow < 1.0) return 0.0;
+      
+      // Constant: 4186 J/kgK / 60s = 69.77
+      return flow * dt * 69.77;
+
+  # 2. Total Energy Accumulator (Wh)
+  - platform: integration
+    sensor: thermal_power_watts
+    name: "Power Output Total"
+    id: thermal_energy_total
+    unit_of_measurement: "Wh"
+    time_unit: h
+    integration_method: left # Corrected parameter
+    restore: true
+
+  # Compressor electrical energy estimate
   - platform: template
     name: "HVAC Power Consumption"
     id: compressor_power_consumption
@@ -153,53 +258,21 @@ sensor:
     unit_of_measurement: "Wh"
     lambda: |-
       if (!id(compressor).state) {
-        return 0.0;
+        return 0.0f;
       }
       int compressor_runtime_value = id(compressor_runtime);
-      float compressor_runtime_hours = compressor_runtime_value / 3600.0;
-      float power_consumption = 1300.0 * compressor_runtime_hours;
-      return power_consumption;
-  - platform: template
-    name: "Power Output Total"
-    id: power_output_counter
-    update_interval: 5s
-    accuracy_decimals: 1
-    unit_of_measurement: "Wh"
-    lambda: |-
-      if (!id(compressor).state) {
-        return 0.0;
-      }
-
-      ESP_LOGD("custom", "Power Out State: %s", id(powerout).state.c_str());
-      String power_output_str = id(powerout).state.c_str();
-      int space_index = power_output_str.indexOf(' ');
-      if (space_index != -1) {
-        power_output_str = power_output_str.substring(0, space_index);
-      }
-      ESP_LOGD("custom", "Power Output Str: %s", power_output_str.c_str());
-      float power_output_value = 0.0;
-      if (!power_output_str.isEmpty()) {
-        power_output_value = power_output_str.toFloat();
-        if (isnan(power_output_value)) {
-          ESP_LOGD("custom", "Conversion to float failed.");
-          return 0.0;
-        }
-      } else {
-        ESP_LOGD("custom", "Power output is empty.");
-        return 0.0;
-        
-      }
-      float cumulative_power_output = (id(power_output_counter).state + power_output_value);
-      ESP_LOGD("custom", "Cumulative Power Output: %.2f", cumulative_power_output);
-      return cumulative_power_output;
+      float compressor_runtime_hours = compressor_runtime_value / 3600.0f;
+      return 1300.0f * compressor_runtime_hours;
 
   - platform: wifi_signal
     name: WiFi Strength
     id: wifi_stats
     update_interval: 60s
 
+############################################
+# OUTPUTS
+############################################
 output:
-
   - platform: ledc
     id: pwm_pump
     pin: GPIO0
@@ -207,12 +280,19 @@ output:
     min_power: 0%
     max_power: 100%
 
+  # Local alarm LED
+  - platform: gpio
+    id: alarm_led
+    pin: GPIO23
+
+############################################
+# SWITCHES
+############################################
 switch:
   - platform: gpio
     pin: GPIO17
     inverted: False
     id: dallas_temppower
-    #name: "dallas_temp Power"
     icon: "mdi:restart"
     restore_mode: RESTORE_DEFAULT_ON
 
@@ -259,16 +339,19 @@ switch:
     pin: GPIO4
     inverted: True
     id: compressorcool
-    #name: "Compressor cooling"
     icon: mdi:valve
     restore_mode: RESTORE_DEFAULT_OFF
     on_turn_on:
       - logger.log: "Compressor too hot"
     on_turn_off:
       - logger.log: "Compressor normal"
+
   - platform: restart
     name: Device Restart
 
+############################################
+# NUMBERS
+############################################
 number:
   - platform: template
     name: "Solar Heater Setpoint"
@@ -281,159 +364,265 @@ number:
     icon: "mdi:thermometer-lines"
     optimistic: true
 
+############################################
+# TEXT SENSORS
+############################################
 text_sensor:
   - platform: template
     name: "Function"
     id: function
     icon: mdi:function-variant
+
+  # Updated to just display the new calculated values nicely
   - platform: template
     name: "Power output"
     id: powerout
+    lambda: |-
+      return {to_string(id(thermal_power_watts).state) + " W"};
+    update_interval: 5s
 
   - platform: template
     name: "System Status"
     id: system_status
 
   - platform: template
+    name: "System Status JSON"
+    id: system_status_json
+
+  - platform: template
+    name: "Last Error"
+    id: last_error
+
+  - platform: template
     name: "Solar Pump Speed"
     id: pump_speed
     lambda: |-
-      int percentage = static_cast<int>(id(pwm_level) * 100);
+      int percentage = static_cast<int>(id(pwm_level) * 100.0f);
       return {to_string(percentage) + "%"};
     update_interval: 1s
+
+############################################
+# INTERVAL LOGIC
+############################################
 interval:
 
+  # 30s – solar pump modulation
   - interval: 30s
     then:
       - if:
           condition:
             and:
-              - lambda: 'return id(collector_temp).state < 120;'
+              - lambda: 'return id(collector_temp).state < 120.0f;'
               - lambda: 'return id(collector_temp).state > id(tanktemp).state;'
               - lambda: 'return id(tanktemp).state < id(tank_temp_setpoint).state;'
           then:
             - lambda: |-
-                auto temp_diff = id(collector_temp).state - id(tanktemp).state;
-                auto pwm_percentage = std::min(std::max(temp_diff / 20.0, 0.0), 1.0);
+                float temp_diff = id(collector_temp).state - id(tanktemp).state;
+                float pwm_percentage = temp_diff / 10.0f;
+                if (pwm_percentage < 0.0f) pwm_percentage = 0.0f;
+                if (pwm_percentage > 1.0f) pwm_percentage = 1.0f;
                 id(pwm_pump).set_level(pwm_percentage);
                 id(pwm_level) = pwm_percentage;
           else:
             - output.turn_off: pwm_pump
-            - lambda: 'id(pwm_level) = 0.0;'
+            - lambda: 'id(pwm_level) = 0.0f;'
 
-
+  # 10s – Safety & Monitoring (Cleaned up)
   - interval: 10s
     then:
+      # 1) Flow averaging and idle status
       - lambda: |-
+          float flow_hot = id(flowhot).state;
+          float flow_cold = id(flowcold).state;
+          const float alpha = 1.0f;
 
-          static float avg_flow_hot = 0.0;
-          static float avg_flow_cold = 0.0;
-          static const float smoothing_factor = 1.0;
-
-          float flowRateHotVal = id(flowhot).state;
-          float flowRateColdVal = id(flowcold).state;
-
-
-          avg_flow_hot = (smoothing_factor * avg_flow_hot) + ((1 - smoothing_factor) * flowRateHotVal);
-          avg_flow_cold = (smoothing_factor * avg_flow_cold) + ((1 - smoothing_factor) * flowRateColdVal);
+          id(avg_flow_hot) = alpha * id(avg_flow_hot) + (1.0f - alpha) * flow_hot;
+          id(avg_flow_cold) = alpha * id(avg_flow_cold) + (1.0f - alpha) * flow_cold;
 
           if (!id(compressor).state) {
-              id(system_status).publish_state("System Idle");
-              return;
-          }
-          if (avg_flow_hot < 1.0 || avg_flow_cold < 1.0) {
-              char buffer[100];
-              snprintf(buffer, sizeof(buffer), "Abnormal flow detected, Expected > 1.0L/min, Hot: %.2fL/min, Cold: %.2fL/min", avg_flow_hot, avg_flow_cold);
-              id(system_status).publish_state(std::string(buffer));
-
-
-              id(compressor).turn_off();
-              id(pumphot).turn_off();
-              id(pumpcold).turn_off();
-              return;
+            id(system_status).publish_state("System Idle");
+            id(system_status_json).publish_state("{\"severity\":\"info\",\"code\":0,\"message\":\"System Idle\"}");
           }
 
-          if (avg_flow_hot > 25.0 || avg_flow_cold > 25.0) {
-              char buffer[100];
-              snprintf(buffer, sizeof(buffer), "Abnormal flow detected, Expected < 25.0L/min, Hot: %.2fL/min, Cold: %.2fL/min", avg_flow_hot, avg_flow_cold);
-              id(system_status).publish_state(std::string(buffer));
-              return;
+      # 2) Critical flow too low
+      - lambda: |-
+          if (!id(compressor).state) return;
+          if (id(error_state) != 0) return;
+
+          float avg_hot = id(avg_flow_hot);
+          float avg_cold = id(avg_flow_cold);
+
+          if (avg_hot < 1.0f || avg_cold < 1.0f) {
+            char msg[160];
+            snprintf(msg, sizeof(msg),
+                     "Abnormal flow: expected > 1.0 L/min, Hot: %.2f L/min, Cold: %.2f L/min",
+                     avg_hot, avg_cold);
+
+            id(error_state) = 1;
+            id(error_clear_timer) = 0;
+
+            id(system_status).publish_state(msg);
+            id(last_error).publish_state(msg);
+
+            char json[256];
+            snprintf(json, sizeof(json),
+                     "{\"severity\":\"critical\",\"code\":1,\"message\":\"%s\"}", msg);
+            id(system_status_json).publish_state(json);
+
+            id(alarm_led).turn_on();
+            id(compressor).turn_off();
+            id(pumphot).turn_off();
+            id(pumpcold).turn_off();
           }
 
-          id(system_status).publish_state("");
-          float compressorTempValue = id(motortemp).state;
-          if (compressorTempValue > 99.0) {
-              id(compressor).turn_off();
-              id(pumpcold).turn_off();
-              id(system_status).publish_state("Compressor overheating: OFF");
-          } else if (compressorTempValue < 90.0) {
-              id(system_status).publish_state("Compressor temperature normal");
-          } else {
-              id(system_status).publish_state("");
+      # 3) Flow too high warning
+      - lambda: |-
+          if (!id(compressor).state) return;
+          if (id(error_state) != 0) return;
+
+          float avg_hot = id(avg_flow_hot);
+          float avg_cold = id(avg_flow_cold);
+
+          if (avg_hot > 25.0f || avg_cold > 25.0f) {
+            char msg[160];
+            snprintf(msg, sizeof(msg),
+                     "Abnormal flow: expected < 25.0 L/min, Hot: %.2f L/min, Cold: %.2f L/min",
+                     avg_hot, avg_cold);
+            
+            id(system_status).publish_state(msg);
+            id(last_error).publish_state(msg);
+            
+            char json[256];
+            snprintf(json, sizeof(json),
+                     "{\"severity\":\"warning\",\"code\":2,\"message\":\"%s\"}", msg);
+            id(system_status_json).publish_state(json);
           }
-          static uint32_t compressor_on_time = 0;
+
+      # 4) Compressor temperature safety
+      - lambda: |-
+          if (!id(compressor).state) return;
+
+          float temp = id(motortemp).state;
+
+          if (temp > 99.0f && id(error_state) == 0) {
+            const char *msg = "Compressor overheating: OFF";
+            id(error_state) = 3;
+            id(error_clear_timer) = 0;
+
+            id(system_status).publish_state(msg);
+            id(last_error).publish_state(msg);
+
+            char json[256];
+            snprintf(json, sizeof(json),
+                     "{\"severity\":\"critical\",\"code\":3,\"message\":\"%s\"}", msg);
+            id(system_status_json).publish_state(json);
+
+            id(alarm_led).turn_on();
+            id(compressor).turn_off();
+            id(pumphot).turn_off();
+            id(pumpcold).turn_off();
+          }
+
+          if (temp > 95.0f) {
+            id(compressorcool).turn_on();
+          } else if (temp < 90.0f) {
+            id(compressorcool).turn_off();
+          }
+
+          if (temp < 90.0f && id(error_state) == 0) {
+            id(system_status).publish_state("Compressor temperature normal");
+            id(system_status_json).publish_state("{\"severity\":\"info\",\"code\":0,\"message\":\"Compressor temperature normal\"}");
+          }
+
+      # 5) Compressor runtime
+      - lambda: |-
+          if (!id(compressor).state) {
+            id(compressor_on_time) = 0;
+            return;
+          }
+          if (id(error_state) != 0) return;
+
+          uint32_t now = millis();
+          uint32_t start = (uint32_t) id(compressor_on_time);
+          if (start == 0u) {
+            id(compressor_on_time) = (int) now;
+            start = now;
+          }
+          uint32_t elapsed = now - start;
+          if (elapsed < 20000u) {
+            id(system_status).publish_state("OK (warm-up)");
+            id(system_status_json).publish_state("{\"severity\":\"info\",\"code\":0,\"message\":\"OK (warm-up)\"}");
+            return;
+          }
+          id(compressor_runtime) += 10;
+
+      # 6) Sensor/flow sanity check
+      - lambda: |-
+          if (!id(compressor).state) return;
+          if (id(error_state) != 0) return;
+
+          float delta_hot = id(hot).state - id(hotin).state;
+          float delta_cold = id(cold).state - id(coldin).state;
+          float flow_hot = id(flowhot).state;
+          float flow_cold = id(flowcold).state;
+
           bool sensors_ok = true;
+          if (isnan(delta_hot) || isnan(delta_cold)) sensors_ok = false;
+          if (flow_hot < 1.0f || flow_cold < 1.0f) sensors_ok = false;
 
-          float deltaTempHot = id(hot).state - id(hotin).state;
-          float deltaTempCold = id(cold).state - id(coldin).state;
+          if (!sensors_ok) {
+            const char *msg = "Fault: Sensor or flow issue";
+            id(error_state) = 4;
+            id(error_clear_timer) = 0;
+            id(system_status).publish_state(msg);
+            id(last_error).publish_state(msg);
+            char json[256];
+            snprintf(json, sizeof(json),
+                     "{\"severity\":\"critical\",\"code\":4,\"message\":\"%s\"}", msg);
+            id(system_status_json).publish_state(json);
+            id(alarm_led).turn_on();
+            id(compressor).turn_off();
+            id(pumphot).turn_off();
+            id(pumpcold).turn_off();
+          }
 
-          if (std::isnan(deltaTempHot) || std::isnan(deltaTempCold)) {
-              sensors_ok = false;
+      # 7) Auto-recovery Logic
+      - lambda: |-
+          if (!id(compressor).state) return;
+          if (id(error_state) != 0) {
+             // Try to clear error if flow recovers
+             if (id(flowhot).state >= 1.0f) {
+                id(error_clear_timer) += 1;
+                if (id(error_clear_timer) >= 6) {
+                   id(error_state) = 0;
+                   id(error_clear_timer) = 0;
+                   id(alarm_led).turn_off();
+                   id(system_status).publish_state("OK");
+                   id(system_status_json).publish_state("{\"severity\":\"info\",\"code\":0,\"message\":\"OK\"}");
+                }
+             } else {
+                id(error_clear_timer) = 0;
+             }
+          } else {
+             // Status update if everything is running fine
+             id(system_status).publish_state("OK");
+             id(system_status_json).publish_state("{\"severity\":\"info\",\"code\":0,\"message\":\"OK\"}");
           }
-          if (flowRateHotVal < 1.0 || flowRateColdVal < 1.0) {
-              sensors_ok = false;
-          }
-          if (id(compressor).state) {
-              if (compressor_on_time == 0) {
-                  compressor_on_time = millis();
-              }
 
-              if (millis() - compressor_on_time < 20000) {
-                  id(system_status).publish_state("OK");
-                  return;
-              }
-              id(compressor_runtime) += 5;
-          } else {
-              compressor_on_time = 0;
-          }
-          float compressorTemp = id(motortemp).state;
-          if (compressorTemp > 95.0) {
-              id(compressorcool).turn_on();
-          }
-          if (id(compressor).state) {
-              if (compressor_on_time == 0) {
-                  compressor_on_time = millis();
-              }
-              if (millis() - compressor_on_time < 10000) {
-                  id(system_status).publish_state("OK");
-                  return;
-              }
-          } else {
-              compressor_on_time = 0;
-          }
-          if (sensors_ok) {
-              float flowRateHot = flowRateHotVal / 60.0;
-              float flowRateCold = flowRateColdVal / 60.0;
-              float heatTransferHot = (deltaTempHot * flowRateHot * 3);
-              char buffer[30];
-              snprintf(buffer, sizeof(buffer), "%.2f Wh", heatTransferHot);
-              id(powerout).publish_state(std::string(buffer));
-              id(system_status).publish_state("OK");
-          } else {
-              id(system_status).publish_state("Fault: Sensor or Flow issue");
-              id(compressor).turn_off();
-              id(pumphot).turn_off();
-              id(pumpcold).turn_off();
-          }
+############################################
+# CLIMATE – MAIN HEATING CONTROL
+############################################
 climate:
   - platform: thermostat
     id: climatehot
     name: "HVAC Heater"
     sensor: tanktemp
     icon: mdi:thermostat
+
     min_heating_off_time: 60s
     min_heating_run_time: 0s
     min_idle_time: 60s
+
     heat_action:
       - switch.turn_on: pumpcold
       - delay: 3s
@@ -444,6 +633,7 @@ climate:
       - text_sensor.template.publish:
           id: function
           state: "Heating"
+
     idle_action:
       - switch.turn_off: compressor
       - delay: 20s
@@ -451,17 +641,20 @@ climate:
       - text_sensor.template.publish:
           id: function
           state: "Idle"
-      #- delay: 20min
-      #- switch.turn_off: pumphot
+      # - delay: 20min
+      # - switch.turn_off: pumphot
+
     default_preset: Winter
     preset:
       - name: Summer
         default_target_temperature_low: 40 °C
       - name: Winter
         default_target_temperature_low: 50 °C
+
     visual:
       min_temperature: 30
       max_temperature: 70
       temperature_step: 1
+
     heat_deadband: 7 °C
     heat_overrun: 0.7 °C
