@@ -1,0 +1,75 @@
+atlantis_csi:
+  id: atlantis_receiver
+  receiver_id: ${receiver_id}
+  transmitter_bssid: "02:00:00:00:00:02"
+  transmitter_mac: ${transmitter_mac}
+  collector_ip: ${collector_ip}
+  collector_port: 38552
+  exclusive_radio_owner_audited: ${exclusive_radio_owner_audited}
+  raw_reports: true
+switch:
+  - platform: template
+    name: RF CSI Sensing
+    id: rf_csi_enable
+    lambda: return id(atlantis_receiver).enabled();
+    turn_on_action:
+      - lambda: id(atlantis_receiver).set_enabled(true);
+    turn_off_action:
+      - lambda: id(atlantis_receiver).set_enabled(false);
+sensor:
+  - platform: template
+    name: RF CSI Queue and Throttle Drops
+    lambda: return id(atlantis_receiver).dropped();
+    update_interval: 10s
+    accuracy_decimals: 0
+  - platform: template
+    name: RF CSI Fault Code
+    lambda: return id(atlantis_receiver).fault();
+    update_interval: 10s
+    accuracy_decimals: 0
+  - platform: template
+    name: RF CSI Reports Sent
+    lambda: return id(atlantis_receiver).reports();
+    update_interval: 10s
+    accuracy_decimals: 0
+  - platform: template
+    name: RF CSI Report Errors
+    lambda: return id(atlantis_receiver).report_errors();
+    update_interval: 10s
+    accuracy_decimals: 0
+  - platform: template
+    name: RF CSI Invalid Samples
+    lambda: return id(atlantis_receiver).invalid();
+    update_interval: 10s
+    accuracy_decimals: 0
+  - platform: template
+    name: RF CSI Unsupported Samples
+    lambda: return id(atlantis_receiver).unsupported();
+    update_interval: 10s
+    accuracy_decimals: 0
+  - platform: template
+    name: RF CSI Original Addr2 Frames
+    lambda: return id(atlantis_receiver).addr2_frames();
+    update_interval: 10s
+    accuracy_decimals: 0
+  - platform: template
+    name: RF CSI Length Rejects
+    lambda: return id(atlantis_receiver).length_rejects();
+    update_interval: 5s
+  - platform: template
+    name: RF CSI Header Rejects
+    lambda: return id(atlantis_receiver).header_rejects();
+    update_interval: 5s
+  - platform: template
+    name: RF CSI AP Mismatches
+    lambda: return id(atlantis_receiver).ap_mismatches();
+    update_interval: 5s
+  - platform: template
+    name: RF CSI Channel
+    lambda: return id(atlantis_receiver).channel();
+    update_interval: 5s
+text_sensor:
+  - platform: template
+    name: RF CSI Receiver BSSID
+    lambda: return id(atlantis_receiver).bssid();
+    update_interval: 5s

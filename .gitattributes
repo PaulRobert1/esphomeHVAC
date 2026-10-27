@@ -1,0 +1,2 @@
+# Preserve embedded upstream JavaScript string whitespace.
+*_web_bundle.js -whitespace

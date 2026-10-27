@@ -1,74 +1,34 @@
-# esphomeHVAC
-esphome yaml to control a diy water to water heat pump with power output among other sensors
+# ESPHome floor heating and solar / heat-pump controller
 
-Hello, guess what? I've almost managed to semi-sort-of-not-really finish setting up the house heating extravaganza! 
-A 300-liter tank with not one, but two snake-like doodads (aka serpentine thingies), two hot water panels, and a MiniSol controller 
-(which turned out to be a mega bummer; note to self: build my own next time).
+Current Home Assistant ESPHome configuration snapshot: **27 October 2026**. Two ESP32 controllers coordinate five floor-heating zones, a DIY water-to-water heat pump and a solar-thermal pump charging a 300 L storage tank.
 
-I cobbled together a DIY water-to-water heat pump from the guts of an ancient compressor from a portable AC unit. 
-Add in two heat exchangers with plates, two circulation pumps, and a piping route of 250 meters buried three meters deep for the cold side—voilà!
-Controlling this madness involved some tech wizardry with an esp8266 for the heat pump, and esp32 integrated into Home Assistant for the heating circuits. 
-Plus, temperature sensors everywhere—Dallas sensors measuring temps for the motor, the hot/cold heat exchanger, and the storage tank.
+| Configuration | Hardware / purpose |
+|---|---|
+| [floorheating.yaml](floorheating.yaml) | `househeating`, NodeMCU-32S: five zone valves, floor pump, HA room-temperature inputs, RF CSI extension (no BLE telemetry) |
+| [HVACSolarHeater.yaml](HVACSolarHeater.yaml) | `hvac-solarheater`, ESP32 DevKit: compressor sequencing, two heat-pump pumps, temperatures, flow meters, solar pump PWM and fault protection |
 
-Picture this: 6 Dallas temperature sensors, a 4-relay board, an ESP8266, 
-and not one, but TWO generic water flow sensors (they're like the quirky sidekicks in this story).
+**Web interface login for both configurations: `admin` / `admin`.** Change the `web_server.auth` fields for your installation. This repository update does not flash installed controllers or change their current credentials.
 
-Sharing the code, maybe it will help others achieve a more efficient cost effective heating solution
+## Start here
 
-************************************************************
-Meanwhile esp8266 did not live up to the task so I switched to a esp32 and updated the code, also added a 2in1 controller for both solar and heat pump controls.
-****************************
-UPDATE:
-HVACSolarHeater is a 2 in 1 config, controls solar pump with pwm and controls HVAC. The DIY Heatpump has been comissioned 2 years ago, last fall gas pressure was same as one year prior, so no leaks.
-It is able to heat 120 square meters, house is wagon type so not the most power efficient. Added Solar heater functionality because commrcial solar controller lacks HA compatibility and SW dewelopers showed no interest to add it. Recirculation pump for the solar water panels is a grundfos which takes pwm input.
-HVAC Error handling has been also grately worked on, encountered alot of bugs in 2 years of operation.
-If one of the following is abnormal the system will halt and the device in HA will show the error.
-Hot and Cold flow, compressor too hot, hot and cold abnormal temperature when operating.
+1. Copy this repository, including the `.h`, `.js`, package and `components/` files, into your ESPHome configuration directory.
+2. Copy `secrets.example.yaml` to `secrets.yaml`. Replace the Wi-Fi, OTA and API values, network addresses and circulation transport key. Documentation-network addresses and zero API keys are examples, not working credentials. Generate independent native API keys with `openssl rand -base64 32`.
+3. Review [wiring](docs/wiring.md). The GPIO map is extracted from the current source; it is not a verified schematic of every terminal or power connection. Review GPIO9 on the floor board before building a replacement.
+4. Adapt the floor controller's HA temperature entity IDs, each Dallas probe address and the installation-specific sensor calibration offsets.
+5. Read [operation and recovery](docs/operation.md), including the distinction between a floor circulation request and a compressor heating request.
+6. Run `esphome config floorheating.yaml` and `esphome config HVACSolarHeater.yaml`, then `esphome compile` for each. Use a current compatible ESPHome environment; the optional CSI extension requires Arduino >=3.3.11 (IDF >=5.5.5).
+7. Commission with actuator power isolated first; check polarity, sensor placement and actual flow before enabling the compressor. Upload is a separate deliberate operation.
 
-In the near future I also want to add a hal sensor to the compressor to detect if it is stuck or not starting up and some sort of pressure sensors for the HVAC refrigerant, was thinking about automotive AC sensors.
-Solar heater sensor and tank backup sensors I used bi-metal temp sensors due to their high temperature resistance. (In summer solar panels when not operating heat upto 200 celsius)
-1) Parts you need
-Core
+The web JavaScript is embedded into each firmware, so its UI does not require an external JavaScript CDN. The native API is encrypted; OTA has a separate password. Neither uses the web login.
 
-ESP32 DevKit (ESP32-WROOM style)
+## Included dependencies
 
-2× MAX6675 modules + 2× K-type thermocouples
-5× DS18B20 (Dallas 1-Wire) temperature sensors (you have 5 addresses)
-2× water flow sensors (pulse output)
-Power / wiring essentials
-Stable 5V supply for ESP32 (USB or buck converter)
-3.3V reference available (ESP32 3V3 pin)
-4.7k resistor for DS18B20 data pull-up (mandatory)
-Pull-up resistors for flow sensors if they are open-collector (often 4.7k–10k to 3.3V)
-Switching / driving loads
-Relays / SSR / MOSFET drivers for:
-Compressor
-Hot pump
-Cold pump
-“compressorcool” valve/relay
-Optional DS18B20 power switching (GPIO17)
-A proper MOSFET driver stage for the PWM solar pump if it’s a DC pump (don’t drive a pump directly from ESP32 pin)
+- `heatpump_controller.h`: heat-pump state machine and protections.
+- `solar_controller.h`: differential solar charging with hysteresis and speed ramping.
+- `circulation_request.h`: expiring, RAM-only circulation demand.
+- `*_web_bundle.js`: embedded web interfaces; bundled ESPHome webserver MIT notices are retained.
+- `atlantis-receiver.yaml`, `components/atlantis_csi/`: RF CSI extension present in the current floor source. It is unrelated to heating demand. See [optional extensions](docs/operation.md#optional-floor-controller-extensions) before enabling it on another installation.
 
-pin layout configured at the time
+Older standalone heat-pump examples and the extensionless configuration are superseded. They remain in Git history, rather than appearing beside the current supported pair.
 
-Inputs (sensors)
-
-GPIO2: 1-Wire bus for DS18B20 sensors
-GPIO36: Hot flow pulse input (flowhot)
-GPIO39: Cold flow pulse input (flowcold)
-MAX6675 #1 CS: GPIO18 (tank_temp2)
-MAX6675 #2 CS: GPIO22 (collector_temp)
-SPI bus:
-CLK: GPIO1
-MISO: GPIO3
-
-Outputs (actuators)
-
-GPIO0: PWM solar pump (LEDC output, pwm_pump)
-GPIO25: Compressor relay (compressor)
-GPIO14: Hot pump relay (pumphot)
-GPIO27: Cold pump relay (pumpcold)
-GPIO4: Compressorcool relay/valve (inverted: active LOW)
-GPIO23: Alarm LED output
-GPIO17: Dallas temp “power” switch output (dallas_temppower)
-
+See [validation and provenance](docs/validation.md) for what was checked and the limits of this source snapshot. Physical installations need correctly rated relays/contactors, protection and independent thermal/pressure cut-outs; GPIOs are control signals, not load power outputs.

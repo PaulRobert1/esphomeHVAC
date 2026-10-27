@@ -1,9 +1,11 @@
+substitutions:
+  receiver_id: "4"
+  transmitter_mac: "02:00:00:00:00:01"
+  collector_ip: "192.0.2.73"
+  exclusive_radio_owner_audited: "true"
 esphome:
-  name: "floorheating"
-  friendly_name: "floorheating"
-
-  on_shutdown:
-    then:
+  name: "househeating"
+  friendly_name: "househeating"
 
 esp32:
   board: nodemcu-32s
@@ -16,219 +18,329 @@ logger:
 # Enable Home Assistant API
 api:
   encryption:
-    key: "..."
+    key: !secret floor_api_key
 
 ota:
-  password: "..."
+- platform: esphome
+  password: !secret floor_ota_password
 
 wifi:
+  power_save_mode: none
+  on_disconnect:
+    then:
+    - lambda: 'id(heating_wifi_disconnects) += 1;'
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  
+
 sensor:
-  - platform: homeassistant
-    entity_id: YOUR.temp_sensor_HERE
-    id: bathroom_temperature
-    name: "Bathroom Temperature"
-    accuracy_decimals: 1
-    filters:
-      - lambda: return x * 1.0;
-  - platform: homeassistant
-    entity_id: YOUR.temp_sensor_HERE
-    id: kitchen_temperature
-    name: "Kitchen Temperature"
-    accuracy_decimals: 1
-    filters:
-      - lambda: return x * 1.0;
-  - platform: homeassistant
-    entity_id: YOUR.temp_sensor_HERE
-    id: livingroom_temperature
-    name: "Livingroom Temperature"
-    accuracy_decimals: 1
-    filters:
-      - lambda: return x * 1.0;
-  - platform: homeassistant
-    entity_id: YOUR.temp_sensor_HERE
-    id: bedroom_temperature
-    name: "Bedroom Temperature"
-    accuracy_decimals: 1
-    filters:
-      - lambda: return x * 1.0;
-  - platform: homeassistant
-    entity_id: YOUR.temp_sensor_HERE
-    id: corridor_temperature
-    name: "Corridor Temperature"
-    accuracy_decimals: 1
-    filters:
-      - lambda: return x * 1.0;
-  - platform: homeassistant
-    entity_id: YOUR.temp_sensor_HERE
-    id: hvac_temperature
-    name: "Storage Tank Temperature"
-    accuracy_decimals: 1
-    filters:
-      - lambda: return x * 1.0;
-    
+- platform: wifi_signal
+  name: "Controller WiFi Signal"
+  update_interval: 30s
+- platform: template
+  name: "Controller WiFi Disconnects"
+  lambda: 'return id(heating_wifi_disconnects);'
+  update_interval: 30s
+  accuracy_decimals: 0
+  entity_category: diagnostic
+- platform: debug
+  free:
+    name: "Controller Free Heap"
+  block:
+    name: "Controller Largest Heap Block"
+  loop_time:
+    name: "Controller Loop Time"
+- platform: uptime
+  name: "Controller Uptime"
+  # Numeric state intentionally refreshes the receiver even when unchanged.
+- platform: template
+  id: floor_circulation_request_value
+  internal: true
+  accuracy_decimals: 0
+  update_interval: 5s
+  lambda: |-
+    return id(pump).state ? 1.0f : 0.0f;
+
+- platform: homeassistant
+  entity_id: sensor.bathroomtemp_zigbee_temperature
+  id: bathroom_temperature
+  name: "_Bathroom Temperature"
+  accuracy_decimals: 1
+
+- platform: homeassistant
+  entity_id: sensor.kitchen_temp_zigbee_temperature
+  id: kitchen_temperature
+  name: "Kitchen Temperature"
+  accuracy_decimals: 1
+
+- platform: homeassistant
+  entity_id: sensor.living_room_living_room_temp_zigbee_temperature
+  id: livingroom_temperature
+  name: "_Livingroom Temperature"
+  accuracy_decimals: 1
+
+- platform: homeassistant
+  entity_id: sensor.bedroom_temp_zigbee_temperature
+  id: bedroom_temperature
+  name: "_Bedroom Temperature"
+  accuracy_decimals: 1
+
+- platform: homeassistant
+  entity_id: sensor.house_corridor_temp_zigbee_kitchentempzigbee_temperature
+  id: corridor_temperature
+  name: "_Corridor Temperature"
+  accuracy_decimals: 1
+
+- platform: homeassistant
+  entity_id: sensor.hot_hvac_temp_out
+  id: hvac_temperature
+  name: "Storage Tank Temperature"
+  accuracy_decimals: 1
+
+- platform: template
+  id: active_thermostats_count
+  name: "Active Thermostats Count"
+  lambda: |-
+    int count = 0;
+    if (id(bathroom).state) count++;
+    if (id(bedroom).state) count++;
+    if (id(kitchen).state) count++;
+    if (id(livingroom).state) count++;
+    if (id(corridor).state) count++;
+    return count;
+  update_interval: 1s
+
+interval:
+- interval: 10s
+  then:
+  - if:
+      condition:
+        lambda: 'return id(active_thermostats_count).state > 0;'
+      then:
+      - switch.turn_on: pump
+      else:
+      - switch.turn_off: pump
+
 switch:
-  - platform: gpio
-    pin: GPIO32
-    inverted: True
-    id: bathroom
-    name: "Bathroom valve"
-    icon: "mdi:restart"
-    restore_mode: RESTORE_DEFAULT_OFF
-    on_turn_on:
-    - logger.log: "Bathroom heating turned on"    
+- platform: restart
+  name: "Device Restart"
 
-  - platform: gpio
-    pin: GPIO33
-    inverted: True
-    id: kitchen
-    name: "Kitchen valve"
-    icon: "mdi:restart"
-    restore_mode: RESTORE_DEFAULT_OFF
-    on_turn_on:
-    - logger.log: "Kitchen heating turned on"    
+- platform: gpio
+  pin: GPIO33
+  inverted: true
+  id: bathroom
+  name: "Bathroom Valve"
+  icon: "mdi:radiator"
+  restore_mode: RESTORE_DEFAULT_OFF
+  on_state:
+  - script.execute: persist_user_settings
+  on_turn_on:
+  - logger.log: "Bathroom heating turned on"
 
-  - platform: gpio
-    pin: GPIO14
-    inverted: True
-    id: livingroom
-    name: "Livingroom valve"
-    icon: "mdi:restart"
-    restore_mode: RESTORE_DEFAULT_OFF
-    on_turn_on:
-    - logger.log: "Livingroom heating turned on"
+- platform: gpio
+  pin: GPIO32
+  inverted: true
+  id: kitchen
+  name: "Kitchen Valve"
+  icon: "mdi:radiator"
+  restore_mode: RESTORE_DEFAULT_OFF
+  on_state:
+  - script.execute: persist_user_settings
+  on_turn_on:
+  - logger.log: "Kitchen heating turned on"
 
-  - platform: gpio
-    pin: GPIO27
-    inverted: True
-    id: bedroom
-    name: "Bedroom valve"
-    icon: "mdi:restart"
-    restore_mode: RESTORE_DEFAULT_OFF
-    on_turn_on:
-    - logger.log: "Bedroom heating turned on"
+- platform: gpio
+  pin: GPIO14
+  inverted: true
+  id: livingroom
+  name: "Livingroom Valve"
+  icon: "mdi:radiator"
+  restore_mode: RESTORE_DEFAULT_OFF
+  on_state:
+  - script.execute: persist_user_settings
+  on_turn_on:
+  - logger.log: "Livingroom heating turned on"
 
-  - platform: gpio
-    pin: GPIO26
-    inverted: True
-    id: corridor
-    name: "Corridor valve"
-    icon: "mdi:restart"
-    restore_mode: RESTORE_DEFAULT_OFF
-    on_turn_on:
-    - logger.log: "Corridor heating turned on"
+- platform: gpio
+  pin: GPIO09
+  inverted: true
+  id: bedroom
+  name: "Bedroom Valve"
+  icon: "mdi:radiator"
+  restore_mode: RESTORE_DEFAULT_OFF
+  on_state:
+  - script.execute: persist_user_settings
+  on_turn_on:
+  - logger.log: "Bedroom heating turned on"
 
-  - platform: gpio
-    pin: GPIO25
-    inverted: True
-    id: bypass
-    name: "Bypass valve"
-    icon: "mdi:restart"
-    restore_mode: RESTORE_DEFAULT_OFF
+- platform: gpio
+  pin: GPIO27
+  inverted: true
+  id: corridor
+  name: "Corridor Valve"
+  icon: "mdi:radiator"
+  restore_mode: RESTORE_DEFAULT_OFF
+  on_state:
+  - script.execute: persist_user_settings
+  on_turn_on:
+  - logger.log: "Corridor heating turned on"
+
+- platform: gpio
+  pin: GPIO26
+  inverted: true
+  id: pump
+  name: "Floor Heating Pump"
+  icon: "mdi:pump"
+  on_turn_on:
+  - component.update: floor_circulation_request_value
+  on_turn_off:
+  - component.update: floor_circulation_request_value
 
 climate:
-  - platform: thermostat
-    name: "Bathroom Climate"
-    sensor: bathroom_temperature
-    min_heating_off_time: 0s
-    min_heating_run_time: 0s
-    min_idle_time: 0s 
-    heat_action:
-      - switch.turn_on: bathroom
-      - logger.log: "Heating Bathroom"
-    idle_action:
-      - switch.turn_off: bathroom
-      - logger.log: "Bathroom heating Idle"
-    visual:
-      min_temperature: 5
-      max_temperature: 33
-      temperature_step: 0.5
+- platform: thermostat
+  on_boot_restore_from: MEMORY
+  on_control:
+  - script.execute: persist_user_settings
+  id: bathroom_climate
+  name: "_Bathroom Climate"
+  sensor: bathroom_temperature
+  min_heating_off_time: 0s
+  min_heating_run_time: 0s
+  min_idle_time: 0s
+  heat_action:
+  - switch.turn_on: bathroom
+  - logger.log: "Heating Bathroom"
+  idle_action:
+  - switch.turn_off: bathroom
+  - logger.log: "Bathroom heating Idle"
 
-  - platform: thermostat
-    name: "Kitchen Climate"
-    sensor: kitchen_temperature
-    min_heating_off_time: 0s
-    min_heating_run_time: 0s
-    min_idle_time: 0s 
-    heat_action:
-      - switch.turn_on: kitchen
-      - logger.log: "Heating Kitchen"
-    idle_action:
-      - switch.turn_off: kitchen
-      - logger.log: "Kitchen heating Idle"
-    visual:
-      min_temperature: 5
-      max_temperature: 33
-      temperature_step: 0.5
+- platform: thermostat
+  on_boot_restore_from: MEMORY
+  on_control:
+  - script.execute: persist_user_settings
+  id: kitchen_climate
+  name: "_Kitchen Climate"
+  sensor: kitchen_temperature
+  min_heating_off_time: 0s
+  min_heating_run_time: 0s
+  min_idle_time: 0s
+  heat_action:
+  - switch.turn_on: kitchen
+  - logger.log: "Heating Kitchen"
+  idle_action:
+  - switch.turn_off: kitchen
+  - logger.log: "Kitchen heating Idle"
 
-  - platform: thermostat
-    name: "Livingroom Climate"
-    sensor: livingroom_temperature
-    min_heating_off_time: 0s
-    min_heating_run_time: 0s
-    min_idle_time: 0s 
-    heat_action:
-      - switch.turn_on: livingroom
-      - logger.log: "Heating Livingroom"
-    idle_action:
-      - switch.turn_off: livingroom
-      - logger.log: "Livingroom heating Idle"
-    visual:
-      min_temperature: 5
-      max_temperature: 33
-      temperature_step: 0.5
+- platform: thermostat
+  on_boot_restore_from: MEMORY
+  on_control:
+  - script.execute: persist_user_settings
+  id: livingroom_climate
+  name: "_Livingroom Climate"
+  sensor: livingroom_temperature
+  min_heating_off_time: 0s
+  min_heating_run_time: 0s
+  min_idle_time: 0s
+  heat_action:
+  - switch.turn_on: livingroom
+  - logger.log: "Heating Livingroom"
+  idle_action:
+  - switch.turn_off: livingroom
+  - logger.log: "Livingroom heating Idle"
 
-  - platform: thermostat
-    name: "Bedroom Climate"
-    sensor: bedroom_temperature
-    min_heating_off_time: 0s
-    min_heating_run_time: 0s
-    min_idle_time: 0s 
-    heat_action:
-      - switch.turn_on: bedroom
-      - logger.log: "Heating Bedroom"
-    idle_action:
-      - switch.turn_off: bedroom
-      - logger.log: "Bedroom heating Idle"
-    visual:
-      min_temperature: 5
-      max_temperature: 33
-      temperature_step: 0.5
+- platform: thermostat
+  on_boot_restore_from: MEMORY
+  on_control:
+  - script.execute: persist_user_settings
+  id: bedroom_climate
+  name: "_Bedroom Climate"
+  sensor: bedroom_temperature
+  min_heating_off_time: 0s
+  min_heating_run_time: 0s
+  min_idle_time: 0s
+  heat_action:
+  - switch.turn_on: bedroom
+  - logger.log: "Heating Bedroom"
+  idle_action:
+  - switch.turn_off: bedroom
+  - logger.log: "Bedroom heating Idle"
 
-  - platform: thermostat
-    name: "Corridor Climate"
-    sensor: corridor_temperature
-    min_heating_off_time: 0s
-    min_heating_run_time: 0s
-    min_idle_time: 0s 
-    heat_action:
-      - switch.turn_on: corridor
-      - logger.log: "Heating Corridor"
-    idle_action:
-      - switch.turn_off: bedroom
-      - logger.log: "Corridor heating Idle"
-    visual:
-      min_temperature: 5
-      max_temperature: 33
-      temperature_step: 0.5
+- platform: thermostat
+  on_boot_restore_from: MEMORY
+  on_control:
+  - script.execute: persist_user_settings
+  id: corridor_climate
+  name: "_Corridor Climate"
+  sensor: corridor_temperature
+  min_heating_off_time: 0s
+  min_heating_run_time: 0s
+  min_idle_time: 0s
+  heat_action:
+  - switch.turn_on: corridor
+  - logger.log: "Heating Corridor"
+  idle_action:
+  - switch.turn_off: corridor
+  - logger.log: "Corridor heating Idle"
 
-  - platform: thermostat
-    name: "Bypass Valve"
-    sensor: hvac_temperature
-    min_heating_off_time: 0s
-    min_heating_run_time: 0s
-    min_idle_time: 0s 
-    heat_action:
-      - switch.turn_off: bypass
-      - logger.log: "Heating Bypass Disabled"
-    idle_action:
-      - switch.turn_on: bypass
-      - logger.log: "Heating bypass Enabled"
-    visual:
-      min_temperature: 5
-      max_temperature: 60
-      temperature_step: 0.5
+# Floor-pump command only: this requests circulation, never compressor heating.
+udp:
+  id: circulation_udp
+  port: 18512
+  addresses: [!secret circulation_broadcast]
 
+packet_transport:
+- platform: udp
+  id: circulation_transport
+  udp_id: circulation_udp
+  update_interval: 5s
+  encryption: !secret circulation_transport_key
+  rolling_code_enable: true
+  sensors:
+  - floor_circulation_request_value
 
+binary_sensor:
+- platform: template
+  id: floor_circulation_requested
+  name: "Floor Circulation Requested"
+  lambda: return id(pump).state;
+
+# Local RF CSI component; heating has no BLE dependency.
+external_components:
+- source:
+    type: local
+    path: components
+  components: [atlantis_csi]
+debug:
+  update_interval: 30s
+globals:
+- id: heating_wifi_disconnects
+  type: uint32_t
+  restore_value: no
+  initial_value: '0'
+web_server:
+  port: 80
+  version: 3
+  local: false
+  js_include: floorheating_web_bundle.js
+  js_url: ""
+  log: false
+  ota: false
+
+  auth:
+    username: admin
+    password: admin
+# Commit settings after native components have queued their updated values.
+# Runtime/energy counters retain their existing periodic checkpoint behavior.
+script:
+- id: persist_user_settings
+  mode: restart
+  then:
+  - delay: 250ms
+  - lambda: |-
+      if (!global_preferences->sync()) {
+        ESP_LOGW("settings", "Settings save failed; periodic retry remains enabled");
+      } else {
+        ESP_LOGD("settings", "Settings saved to flash");
+      }
+
+packages:
+  atlantis: !include atlantis-receiver.yaml
